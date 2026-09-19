@@ -239,6 +239,73 @@ export default function App() {
     return baseList;
   });
 
+  // Helper: Persist user-submitted setups globally to server backend database
+  const syncGlobalSetupsToServer = async (allCurrentSetups: CarSetup[]) => {
+    try {
+      const userSubmittedOnly = allCurrentSetups.filter((s) => s.isUserSubmitted);
+      await fetch('/api/setups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userSubmittedOnly),
+      });
+    } catch (err) {
+      console.warn('Failed to sync setups globally to server:', err);
+    }
+  };
+
+  // Global Synchronizer: fetch latest global community setups from server database
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchGlobalSetups = async () => {
+      try {
+        const res = await fetch('/api/setups');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.setups) && isMounted) {
+            const serverSetups: CarSetup[] = data.setups;
+
+            setSetups((prev) => {
+              const customMap = new Map<string, CarSetup>();
+
+              // 1. Local custom setups
+              prev.filter((s) => s.isUserSubmitted).forEach((s) => customMap.set(s.id, s));
+
+              // 2. Override & merge server-persisted community setups from all users
+              serverSetups.forEach((s) => customMap.set(s.id, s));
+
+              const mergedCustomList = Array.from(customMap.values());
+
+              // Persist merged pool to local storage cache
+              try {
+                localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(mergedCustomList));
+              } catch (e) {
+                // ignore write error
+              }
+
+              // Combine global community custom setups with initial seed setups
+              return [...mergedCustomList, ...INITIAL_SETUPS];
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Using local setups cache (server offline or starting)', err);
+      }
+    };
+
+    fetchGlobalSetups();
+
+    // Poll every 8 seconds so all users see new setups shared by anyone in real-time
+    const setupPollInterval = setInterval(fetchGlobalSetups, 8000);
+    window.addEventListener('focus', fetchGlobalSetups);
+
+    return () => {
+      isMounted = false;
+      clearInterval(setupPollInterval);
+      window.removeEventListener('focus', fetchGlobalSetups);
+    };
+  }, []);
+
   // Calculate pending verification submissions for admin badge
   const pendingAdminCount = setups.filter(
     (s) => s.verificationStatus === 'pending' || (!s.verificationStatus && s.isUserSubmitted && !s.isProofVerified)
@@ -265,6 +332,7 @@ export default function App() {
       try {
         const userOnly = updated.filter((s) => s.isUserSubmitted);
         localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(userOnly));
+        syncGlobalSetupsToServer(updated);
       } catch (e) {
         console.warn('Could not persist setup verification status', e);
       }
@@ -310,6 +378,7 @@ export default function App() {
       try {
         const userOnly = updated.filter((s) => s.isUserSubmitted);
         localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(userOnly));
+        syncGlobalSetupsToServer(updated);
       } catch (e) {
         console.warn('Could not persist custom setups', e);
       }
@@ -343,6 +412,7 @@ export default function App() {
       try {
         const userOnly = updated.filter((s) => s.isUserSubmitted);
         localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(userOnly));
+        syncGlobalSetupsToServer(updated);
       } catch (e) {
         console.warn('Could not persist custom setups after update', e);
       }
@@ -357,6 +427,7 @@ export default function App() {
       try {
         const userOnly = updated.filter((s) => s.isUserSubmitted);
         localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(userOnly));
+        syncGlobalSetupsToServer(updated);
       } catch (e) {
         console.warn('Could not persist custom setups after deletion', e);
       }
