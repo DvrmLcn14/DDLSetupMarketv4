@@ -58,6 +58,12 @@ import { TRACKS, SIM_GAMES } from '../data/mockData';
 import { INITIAL_COMMENTS } from '../data/mockComments';
 import { StarRating } from './StarRating';
 import { SetupDiscussion } from './SetupDiscussion';
+import {
+  isSupabaseConfigured,
+  fetchCommentsFromSupabase,
+  saveCommentToSupabase,
+  subscribeToSupabaseComments,
+} from '../lib/supabase';
 import { SubmitSetupModal } from './SubmitSetupModal';
 import { CreatorProfileModal } from './CreatorProfileModal';
 import { downloadSetupAsImage } from '../utils/setupImageExport';
@@ -264,16 +270,21 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
     return INITIAL_COMMENTS;
   });
 
-  // Helper: Persist comments array to global server backend
+  // Helper: Persist comments array to global server backend & Supabase
   const syncCommentsToServer = async (allComments: SetupComment[]) => {
     try {
+      if (isSupabaseConfigured()) {
+        for (const comment of allComments) {
+          await saveCommentToSupabase(comment);
+        }
+      }
       await fetch('/api/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(allComments),
       });
     } catch (err) {
-      console.warn('Failed to sync comments to server:', err);
+      console.warn('Failed to sync comments to server/Supabase:', err);
     }
   };
 
@@ -282,6 +293,16 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
     let isMounted = true;
 
     const fetchGlobalComments = async () => {
+      if (isSupabaseConfigured()) {
+        const supComments = await fetchCommentsFromSupabase();
+        if (supComments && supComments.length > 0 && isMounted) {
+          setComments(supComments);
+          try {
+            localStorage.setItem('sim_marketplace_comments', JSON.stringify(supComments));
+          } catch (e) {}
+        }
+      }
+
       try {
         const res = await fetch('/api/comments');
         if (res.ok) {
@@ -301,6 +322,13 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
     };
 
     fetchGlobalComments();
+
+    let unsubscribeSupabaseComments = () => {};
+    if (isSupabaseConfigured()) {
+      unsubscribeSupabaseComments = subscribeToSupabaseComments(() => {
+        fetchGlobalComments();
+      });
+    }
 
     // SSE EventSource connection for instant live comments broadcast
     let eventSource: EventSource | null = null;
@@ -325,6 +353,7 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
 
     return () => {
       isMounted = false;
+      unsubscribeSupabaseComments();
       if (eventSource) eventSource.close();
       clearInterval(pollInterval);
     };

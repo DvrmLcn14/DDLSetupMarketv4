@@ -11,6 +11,13 @@ import { AdminPage } from './components/AdminPage';
 import { FloatingBanner } from './components/FloatingBanner';
 import { BannerConfigModal } from './components/BannerConfigModal';
 import { F1SetupEngineerChat } from './components/F1SetupEngineerChat';
+import {
+  isSupabaseConfigured,
+  fetchSetupsFromSupabase,
+  saveSetupToSupabase,
+  deleteSetupFromSupabase,
+  subscribeToSupabaseSetups,
+} from './lib/supabase';
 
 export default function App() {
   // Active game selected in the marketplace (defaults to F1 25)
@@ -239,41 +246,52 @@ export default function App() {
     return baseList;
   });
 
-  // Helper: Persist single user-submitted setup globally to server backend database
+  // Helper: Persist single user-submitted setup globally to cloud database (Supabase + Server API)
   const saveSingleSetupToServer = async (setup: CarSetup) => {
     try {
+      if (isSupabaseConfigured()) {
+        await saveSetupToSupabase(setup);
+      }
       await fetch('/api/setups/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(setup),
       });
     } catch (err) {
-      console.warn('Failed to save setup globally to server:', err);
+      console.warn('Failed to save setup globally to server/Supabase:', err);
     }
   };
 
-  // Helper: Delete setup globally from server backend database
+  // Helper: Delete setup globally from cloud database (Supabase + Server API)
   const deleteSetupFromServer = async (setupId: string) => {
     try {
+      if (isSupabaseConfigured()) {
+        await deleteSetupFromSupabase(setupId);
+      }
       await fetch(`/api/setups/${setupId}`, {
         method: 'DELETE',
       });
     } catch (err) {
-      console.warn('Failed to delete setup globally on server:', err);
+      console.warn('Failed to delete setup globally on server/Supabase:', err);
     }
   };
 
-  // Helper: Persist user-submitted setups globally to server backend database
+  // Helper: Persist user-submitted setups globally to cloud database
   const syncGlobalSetupsToServer = async (allCurrentSetups: CarSetup[]) => {
     try {
       const userSubmittedOnly = allCurrentSetups.filter((s) => s.isUserSubmitted);
+      if (isSupabaseConfigured()) {
+        for (const setup of userSubmittedOnly) {
+          await saveSetupToSupabase(setup);
+        }
+      }
       await fetch('/api/setups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(userSubmittedOnly),
       });
     } catch (err) {
-      console.warn('Failed to sync setups globally to server:', err);
+      console.warn('Failed to sync setups globally to server/Supabase:', err);
     }
   };
 
@@ -282,6 +300,28 @@ export default function App() {
     let isMounted = true;
 
     const fetchGlobalSetups = async () => {
+      // 1. Try fetching directly from Supabase Cloud Database if configured
+      if (isSupabaseConfigured()) {
+        const supabaseData = await fetchSetupsFromSupabase();
+        if (supabaseData && isMounted) {
+          setSetups((prev) => {
+            const customMap = new Map<string, CarSetup>();
+            supabaseData.forEach((s) => customMap.set(s.id, { ...s, isUserSubmitted: true }));
+            prev.filter((s) => s.isUserSubmitted).forEach((s) => {
+              if (!customMap.has(s.id)) {
+                customMap.set(s.id, { ...s, isUserSubmitted: true });
+              }
+            });
+            const mergedCustomList = Array.from(customMap.values());
+            try {
+              localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(mergedCustomList));
+            } catch (e) {}
+            return [...mergedCustomList, ...INITIAL_SETUPS];
+          });
+        }
+      }
+
+      // 2. Fetch from Express API Backend
       try {
         const res = await fetch('/api/setups');
         if (res.ok) {
@@ -292,10 +332,10 @@ export default function App() {
             setSetups((prev) => {
               const customMap = new Map<string, CarSetup>();
 
-              // 1. Add all server-persisted community setups from all users
+              // Add all server-persisted community setups from all users
               serverSetups.forEach((s) => customMap.set(s.id, { ...s, isUserSubmitted: true }));
 
-              // 2. Add local custom setups that might be pending
+              // Add local custom setups that might be pending
               prev.filter((s) => s.isUserSubmitted).forEach((s) => {
                 if (!customMap.has(s.id)) {
                   customMap.set(s.id, { ...s, isUserSubmitted: true });
@@ -304,14 +344,10 @@ export default function App() {
 
               const mergedCustomList = Array.from(customMap.values());
 
-              // Persist merged pool to local storage cache
               try {
                 localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(mergedCustomList));
-              } catch (e) {
-                // ignore write error
-              }
+              } catch (e) {}
 
-              // Combine global community custom setups with initial seed setups
               return [...mergedCustomList, ...INITIAL_SETUPS];
             });
           }
@@ -321,10 +357,18 @@ export default function App() {
       }
     };
 
-    // 1. Initial fetch on mount
+    // Initial fetch on mount
     fetchGlobalSetups();
 
-    // 2. Real-time Server-Sent Events (SSE) listener for instantaneous 0-delay updates across all browsers
+    // Active Supabase Realtime Subscription if configured
+    let unsubscribeSupabase = () => {};
+    if (isSupabaseConfigured()) {
+      unsubscribeSupabase = subscribeToSupabaseSetups(() => {
+        fetchGlobalSetups();
+      });
+    }
+
+    // Real-time Server-Sent Events (SSE) listener for instantaneous 0-delay updates
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/events');
@@ -350,20 +394,19 @@ export default function App() {
           } else if (payload.type === 'BANNER_UPDATED' && payload.payload && isMounted) {
             setBannerConfig(payload.payload);
           }
-        } catch (e) {
-          // parse error
-        }
+        } catch (e) {}
       };
     } catch (err) {
       console.warn('SSE EventSource connection fallback to polling:', err);
     }
 
-    // 3. Fast fallback interval polling (5 seconds)
+    // Fast fallback interval polling (5 seconds)
     const setupPollInterval = setInterval(fetchGlobalSetups, 5000);
     window.addEventListener('focus', fetchGlobalSetups);
 
     return () => {
       isMounted = false;
+      unsubscribeSupabase();
       if (eventSource) eventSource.close();
       clearInterval(setupPollInterval);
       window.removeEventListener('focus', fetchGlobalSetups);
