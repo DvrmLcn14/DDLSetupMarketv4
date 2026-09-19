@@ -1,0 +1,67 @@
+{
+  "enabled": true,
+  "autoRotate": true,
+  "intervalSeconds": 3,
+  "items": [
+    {
+      "id": "prl-league-ad",
+      "title": "Join PRL League",
+      "highlightText": "Official League",
+      "description": "Access exclusive PRL League setups, live race telemetry, championship standings, and connect with fellow F1 drivers.",
+      "buttonText": "Join PRL League",
+      "buttonUrl": "https://discord.gg/aFzAhfBy3",
+      "badgeText": "OFFICIAL LEAGUE",
+      "onlineCount": 428,
+      "iconType": "discord",
+      "accentColor": "indigo"
+    },
+    {
+      "id": "horizon-racing-series",
+      "title": "Horizon Racing Series",
+      "highlightText": "Partner League",
+      "description": "Join Horizon Racing Series for competitive weekly championship lobbies, clean racing, and community events.",
+      "buttonText": "Join Horizon Racing",
+      "buttonUrl": "https://discord.gg/bKHrsNJ5a",
+      "badgeText": "HORIZON RACING",
+      "onlineCount": 385,
+      "iconType": "discord",
+      "accentColor": "amber"
+    },
+    {
+      "id": "sfl-league",
+      "title": "SFL League",
+      "highlightText": "Partner League",
+      "description": "Compete in the SFL League with dedicated tier divisions, live race stewarding, and championship leaderboard tracking.",
+      "buttonText": "Join SFL League",
+      "buttonUrl": "https://discord.gg/9Gmwt2Wh5Eurs",
+      "badgeText": "SFL LEAGUE",
+      "onlineCount": 490,
+      "iconType": "trophy",
+      "accentColor": "emerald"
+    },
+    {
+      "id": "f1-26-league",
+      "title": "F1 26 League",
+      "highlightText": "Next-Gen F1",
+      "description": "Prepare for the next era in the F1 26 League with custom car setups, telemetry coaching, and weekly tier racing.",
+      "buttonText": "Join F1 26 League",
+      "buttonUrl": "https://discord.gg/zffspwSwM",
+      "badgeText": "F1 26 LEAGUE",
+      "onlineCount": 310,
+      "iconType": "zap",
+      "accentColor": "cyan"
+    },
+    {
+      "id": "paradise-racing-league",
+      "title": "Paradise Racing League",
+      "highlightText": "Esports League",
+      "description": "Equal Performance off and the economy works. High-intensity wheel-to-wheel action and weekly championship races.",
+      "buttonText": "Join Paradise League",
+      "buttonUrl": "https://discord.gg/PVG5P4PUW",
+      "badgeText": "PARADISE RACING",
+      "onlineCount": 560,
+      "iconType": "discord",
+      "accentColor": "purple"
+    }
+  ]
+}
