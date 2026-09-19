@@ -78,69 +78,148 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
     const cleanUsername = username.trim().replace(/^@/, '');
     if (!cleanUsername) {
-      setErrorMessage('Please enter a username.');
+      setErrorMessage('Lütfen geçerli bir kullanıcı adı girin.');
       return;
     }
 
     if (!password || password.length < 4) {
-      setErrorMessage('Password must be at least 4 characters long.');
+      setErrorMessage('Şifre en az 4 karakter olmalıdır.');
       return;
     }
 
-    const currentUsers = getStoredUsers();
+    setIsLoading(true);
 
-    if (mode === 'login') {
-      const found = currentUsers.find(
-        (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
-      );
+    try {
+      if (mode === 'login') {
+        // Attempt Server Login First
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cleanUsername, password }),
+        });
 
-      if (!found) {
-        setErrorMessage('Username not found. Check your spelling or create an account.');
-        return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            setIsLoading(false);
+            onLoginSuccess(data.user);
+            onClose();
+            return;
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.error) {
+            setErrorMessage(errData.error);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        // Fallback to local storage user check
+        const currentUsers = getStoredUsers();
+        const found = currentUsers.find(
+          (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
+        );
+
+        if (!found) {
+          setErrorMessage('Kullanıcı adı bulunamadı. Lütfen kontrol edin veya hesap oluşturun.');
+          setIsLoading(false);
+          return;
+        }
+
+        if (found.password && found.password !== password) {
+          setErrorMessage('Hatalı şifre. Lütfen tekrar deneyin.');
+          setIsLoading(false);
+          return;
+        }
+
+        const isAdmin = Boolean(found.isAdmin || found.role === 'admin' || found.username.toLowerCase() === 'admin');
+        const userObj: UserAccount = {
+          ...found,
+          role: isAdmin ? 'admin' : 'user',
+          isAdmin,
+        };
+
+        setIsLoading(false);
+        onLoginSuccess(userObj);
+        onClose();
+      } else {
+        // Register Mode
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: cleanUsername,
+            password,
+            badge,
+            isAdmin: cleanUsername.toLowerCase() === 'admin',
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            setIsLoading(false);
+            onLoginSuccess(data.user);
+            onClose();
+            return;
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.error) {
+            setErrorMessage(errData.error);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        // Local Storage Fallback
+        const currentUsers = getStoredUsers();
+        const exists = currentUsers.some(
+          (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
+        );
+
+        if (exists) {
+          setErrorMessage('Bu kullanıcı adı zaten alınmış. Başka bir isim seçin.');
+          setIsLoading(false);
+          return;
+        }
+
+        const isAdmin = cleanUsername.toLowerCase() === 'admin';
+        const newUser: UserAccount = {
+          username: cleanUsername,
+          password: password,
+          badge: badge,
+          role: isAdmin ? 'admin' : 'user',
+          isAdmin,
+          createdAt: new Date().toISOString().split('T')[0],
+        };
+
+        try {
+          const stored = localStorage.getItem('sim_marketplace_users');
+          const list: UserAccount[] = stored ? JSON.parse(stored) : [];
+          list.push(newUser);
+          localStorage.setItem('sim_marketplace_users', JSON.stringify(list));
+        } catch (err) {
+          console.warn('Could not persist new user:', err);
+        }
+
+        setIsLoading(false);
+        onLoginSuccess(newUser);
+        onClose();
       }
-
-      if (found.password && found.password !== password) {
-        setErrorMessage('Incorrect password. Please try again.');
-        return;
-      }
-
-      onLoginSuccess(found);
-      onClose();
-    } else {
-      // Register Mode
-      const exists = currentUsers.some(
-        (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
-      );
-
-      if (exists) {
-        setErrorMessage('This username is already taken. Please choose another.');
-        return;
-      }
-
-      const newUser: UserAccount = {
-        username: cleanUsername,
-        password: password,
-        badge: badge,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-
-      try {
-        const stored = localStorage.getItem('sim_marketplace_users');
-        const list: UserAccount[] = stored ? JSON.parse(stored) : [];
-        list.push(newUser);
-        localStorage.setItem('sim_marketplace_users', JSON.stringify(list));
-      } catch (err) {
-        console.warn('Could not persist new user:', err);
-      }
-
-      onLoginSuccess(newUser);
-      onClose();
+    } catch (err: any) {
+      console.warn('Auth request failed, using local auth fallback:', err);
+      setIsLoading(false);
+      setErrorMessage('Bağlantı hatası oluştu, lütfen tekrar deneyin.');
     }
   };
 

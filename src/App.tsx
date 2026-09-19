@@ -7,6 +7,7 @@ import { AuthBarrier } from './components/AuthBarrier';
 import { AuthModal } from './components/AuthModal';
 import { DesktopHeader } from './components/DesktopHeader';
 import { AdminVerificationPanel } from './components/AdminVerificationPanel';
+import { AdminPage } from './components/AdminPage';
 import { FloatingBanner } from './components/FloatingBanner';
 import { BannerConfigModal } from './components/BannerConfigModal';
 import { F1SetupEngineerChat } from './components/F1SetupEngineerChat';
@@ -78,6 +79,42 @@ export default function App() {
   const [isSubmitModalTriggered, setIsSubmitModalTriggered] = useState<boolean>(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false);
   const [isBannerConfigOpen, setIsBannerConfigOpen] = useState<boolean>(false);
+
+  // SPA Route State ('marketplace' | 'admin')
+  const [currentRoute, setCurrentRoute] = useState<'marketplace' | 'admin'>(() => {
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname === '/admin' || window.location.hash === '#/admin') {
+        return 'admin';
+      }
+    }
+    return 'marketplace';
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.pathname === '/admin' || window.location.hash === '#/admin') {
+        setCurrentRoute('admin');
+      } else {
+        setCurrentRoute('marketplace');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateToAdmin = () => {
+    setCurrentRoute('admin');
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', '/admin');
+    }
+  };
+
+  const navigateToHome = () => {
+    setCurrentRoute('marketplace');
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', '/');
+    }
+  };
 
   // Floating Banner / Ad Box state with global server sync and local cache fallback
   const [bannerConfig, setBannerConfig] = useState<FloatingBannerConfig>(() => {
@@ -399,6 +436,22 @@ export default function App() {
     });
   };
 
+  if (currentRoute === 'admin') {
+    return (
+      <AdminPage
+        currentUser={currentUser}
+        onLoginSuccess={handleLogin}
+        onNavigateHome={navigateToHome}
+        setups={setups}
+        onUpdateSetupStatus={handleUpdateSetupStatus}
+        onUpdateSetup={handleUpdateSetup}
+        onDeleteSetup={handleDeleteSetup}
+        bannerConfig={bannerConfig}
+        onSaveBannerConfig={handleSaveBannerConfig}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Clean Top Navigation Bar with F1 25 / F1 26 / Favorites Tab Switcher */}
@@ -417,7 +470,7 @@ export default function App() {
         favoritesCount={favoriteIds.length}
         isFavoritesActive={activeViewMode === 'favorites'}
         onSelectFavorites={handleSelectFavorites}
-        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+        onOpenAdminPanel={navigateToAdmin}
         pendingAdminCount={pendingAdminCount}
       />
 

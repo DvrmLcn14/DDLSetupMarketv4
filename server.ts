@@ -20,6 +20,69 @@ async function startServer() {
 
   const bannerConfigFile = path.join(dataDir, 'banner-config.json');
   const setupsFile = path.join(dataDir, 'setups.json');
+  const usersFile = path.join(dataDir, 'users.json');
+
+  // Default initial users list
+  const defaultUsers = [
+    {
+      username: 'admin',
+      password: 'admin123',
+      badge: 'Admin / Founder',
+      role: 'admin',
+      isAdmin: true,
+      bio: 'Sistem Yöneticisi & Kurucu',
+      createdAt: '2026-01-01',
+    },
+    {
+      username: 'ApexRacer',
+      password: 'password123',
+      badge: 'Pro',
+      role: 'user',
+      isAdmin: false,
+      bio: 'Formula and GT3 time trial specialist.',
+      createdAt: '2026-01-15',
+    },
+    {
+      username: 'VerstappenSim',
+      password: 'password123',
+      badge: 'Esports',
+      role: 'user',
+      isAdmin: false,
+      bio: 'Virtual endurance and qualifying engineer.',
+      createdAt: '2026-02-01',
+    },
+    {
+      username: 'TrackMaster99',
+      password: 'password123',
+      badge: 'Community',
+      role: 'user',
+      isAdmin: false,
+      bio: 'Passionate sim racer sharing custom balanced setups.',
+      createdAt: '2026-03-10',
+    },
+  ];
+
+  // Load existing users from file or initialize with defaults
+  let globalUsersList: any[] = defaultUsers;
+  try {
+    if (fs.existsSync(usersFile)) {
+      const raw = fs.readFileSync(usersFile, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        globalUsersList = parsed;
+        // Ensure default admin user always exists
+        if (!globalUsersList.some((u) => u.username.toLowerCase() === 'admin')) {
+          globalUsersList.unshift(defaultUsers[0]);
+        }
+      } else {
+        fs.writeFileSync(usersFile, JSON.stringify(defaultUsers, null, 2), 'utf-8');
+      }
+    } else {
+      fs.writeFileSync(usersFile, JSON.stringify(defaultUsers, null, 2), 'utf-8');
+    }
+  } catch (err) {
+    console.error('Error loading global users file:', err);
+  }
 
   // Default initial banner configuration
   const defaultBannerConfig = {
@@ -185,6 +248,231 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error('Error saving setups:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==========================================
+  // USER ACCOUNT & ADMIN MANAGEMENT API ROUTES
+  // ==========================================
+
+  // GET /api/users - Fetch all registered users
+  app.get('/api/users', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({
+      success: true,
+      users: globalUsersList.map((u) => ({
+        username: u.username,
+        badge: u.badge || 'Community',
+        role: u.role || (u.isAdmin ? 'admin' : 'user'),
+        isAdmin: Boolean(u.isAdmin || u.role === 'admin' || u.username.toLowerCase() === 'admin'),
+        bio: u.bio || '',
+        createdAt: u.createdAt || '2026-01-01',
+      })),
+    });
+  });
+
+  // POST /api/auth/login - Authenticate user credentials
+  app.post('/api/auth/login', (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Username and password required' });
+      }
+
+      const found = globalUsersList.find(
+        (u) => u.username.toLowerCase() === username.trim().toLowerCase()
+      );
+
+      if (!found) {
+        return res.status(401).json({ success: false, error: 'Kullanıcı bulunamadı.' });
+      }
+
+      if (found.password && found.password !== password) {
+        return res.status(401).json({ success: false, error: 'Hatalı şifre.' });
+      }
+
+      const isAdmin = Boolean(found.isAdmin || found.role === 'admin' || found.username.toLowerCase() === 'admin');
+
+      const userSession = {
+        username: found.username,
+        badge: found.badge || 'Community',
+        role: isAdmin ? 'admin' : 'user',
+        isAdmin: isAdmin,
+        bio: found.bio || '',
+        createdAt: found.createdAt || new Date().toISOString().split('T')[0],
+      };
+
+      res.json({
+        success: true,
+        user: userSession,
+      });
+    } catch (err: any) {
+      console.error('Error logging in:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/auth/register - Register new user account
+  app.post('/api/auth/register', (req, res) => {
+    try {
+      const { username, password, badge, bio, isAdmin, role } = req.body;
+      const cleanUsername = username?.trim();
+
+      if (!cleanUsername || !password) {
+        return res.status(400).json({ success: false, error: 'Kullanıcı adı ve şifre zorunludur.' });
+      }
+
+      const exists = globalUsersList.some(
+        (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
+      );
+
+      if (exists) {
+        return res.status(400).json({ success: false, error: 'Bu kullanıcı adı zaten kullanılıyor.' });
+      }
+
+      const isUserAdmin = Boolean(isAdmin || role === 'admin' || cleanUsername.toLowerCase() === 'admin');
+
+      const newUser = {
+        username: cleanUsername,
+        password: password,
+        badge: badge || 'Community',
+        role: isUserAdmin ? 'admin' : (role || 'user'),
+        isAdmin: isUserAdmin,
+        bio: bio || '',
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+
+      globalUsersList.push(newUser);
+      fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
+
+      res.json({
+        success: true,
+        user: {
+          username: newUser.username,
+          badge: newUser.badge,
+          role: newUser.role,
+          isAdmin: newUser.isAdmin,
+          bio: newUser.bio,
+          createdAt: newUser.createdAt,
+        },
+      });
+    } catch (err: any) {
+      console.error('Error registering user:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/admin/users - Admin creates new user account
+  app.post('/api/admin/users', (req, res) => {
+    try {
+      const { username, password, badge, role, isAdmin, bio } = req.body;
+      const cleanUsername = username?.trim();
+
+      if (!cleanUsername || !password) {
+        return res.status(400).json({ success: false, error: 'Kullanıcı adı ve şifre gereklidir.' });
+      }
+
+      const exists = globalUsersList.some(
+        (u) => u.username.toLowerCase() === cleanUsername.toLowerCase()
+      );
+
+      if (exists) {
+        return res.status(400).json({ success: false, error: 'Bu kullanıcı adı zaten mevcut.' });
+      }
+
+      const isUserAdmin = Boolean(isAdmin || role === 'admin');
+
+      const newUser = {
+        username: cleanUsername,
+        password: password,
+        badge: badge || (isUserAdmin ? 'Admin / Founder' : 'Community'),
+        role: isUserAdmin ? 'admin' : 'user',
+        isAdmin: isUserAdmin,
+        bio: bio || '',
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+
+      globalUsersList.push(newUser);
+      fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
+
+      res.json({
+        success: true,
+        message: 'Kullanıcı başarıyla oluşturuldu.',
+        users: globalUsersList,
+      });
+    } catch (err: any) {
+      console.error('Error creating user via admin:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // PUT /api/admin/users/:username - Admin updates user account (role, isAdmin, badge, password)
+  app.put('/api/admin/users/:username', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const { isAdmin, role, badge, password, bio } = req.body;
+
+      const userIndex = globalUsersList.findIndex(
+        (u) => u.username.toLowerCase() === targetUsername.toLowerCase()
+      );
+
+      if (userIndex === -1) {
+        return res.status(404).json({ success: false, error: 'Kullanıcı bulunamadı.' });
+      }
+
+      const currentUser = globalUsersList[userIndex];
+      const newIsAdmin = isAdmin !== undefined ? Boolean(isAdmin) : (role === 'admin' ? true : currentUser.isAdmin);
+
+      globalUsersList[userIndex] = {
+        ...currentUser,
+        badge: badge || currentUser.badge,
+        role: newIsAdmin ? 'admin' : 'user',
+        isAdmin: newIsAdmin,
+        password: password || currentUser.password,
+        bio: bio !== undefined ? bio : currentUser.bio,
+      };
+
+      fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
+
+      res.json({
+        success: true,
+        message: 'Kullanıcı bilgileri güncellendi.',
+        users: globalUsersList,
+      });
+    } catch (err: any) {
+      console.error('Error updating user:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/admin/users/:username - Admin deletes user account
+  app.delete('/api/admin/users/:username', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+
+      if (targetUsername.toLowerCase() === 'admin') {
+        return res.status(403).json({ success: false, error: 'Ana admin hesabı silinemez.' });
+      }
+
+      const initialCount = globalUsersList.length;
+      globalUsersList = globalUsersList.filter(
+        (u) => u.username.toLowerCase() !== targetUsername.toLowerCase()
+      );
+
+      if (globalUsersList.length === initialCount) {
+        return res.status(404).json({ success: false, error: 'Kullanıcı bulunamadı.' });
+      }
+
+      fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
+
+      res.json({
+        success: true,
+        message: 'Kullanıcı hesabı silindi.',
+        users: globalUsersList,
+      });
+    } catch (err: any) {
+      console.error('Error deleting user:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

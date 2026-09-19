@@ -129,6 +129,7 @@ export interface UserAccount {
   password?: string;
   badge: 'Community' | 'Pro' | 'Esports' | 'Verified' | 'Admin / Founder' | string;
   role?: 'admin' | 'user' | string;
+  isAdmin?: boolean;
   avatar?: string;
   bio?: string;
   createdAt: string;
