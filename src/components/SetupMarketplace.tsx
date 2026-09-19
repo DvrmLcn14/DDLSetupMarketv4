@@ -38,6 +38,7 @@ import {
   Bookmark,
   BookmarkCheck,
   Heart,
+  Globe,
   MessageSquare,
   MessageCircle,
   Star,
@@ -482,9 +483,13 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
   const filteredSetups = useMemo(() => {
     return setups
       .filter((setup) => {
-        // Game filter
-        if (selectedGameFilter !== 'all' && setup.gameId.toLowerCase() !== selectedGameFilter.toLowerCase()) {
-          return false;
+        // Game filter with ID normalization (e.g. f1_25 vs f1-25)
+        if (selectedGameFilter !== 'all') {
+          const sgNorm = selectedGameFilter.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const setupGameNorm = (setup.gameId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (sgNorm !== setupGameNorm) {
+            return false;
+          }
         }
 
         // View Mode: Favorites or My Setups
@@ -501,9 +506,13 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
           }
         }
 
-        // Track filter
-        if (selectedTrackFilter !== 'all' && setup.trackId.toLowerCase() !== selectedTrackFilter.toLowerCase()) {
-          return false;
+        // Track filter with ID normalization
+        if (selectedTrackFilter !== 'all') {
+          const stNorm = selectedTrackFilter.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const setupTrackNorm = (setup.trackId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (stNorm !== setupTrackNorm) {
+            return false;
+          }
         }
 
         // Input Device filter (Wheel, Gamepad, Keyboard)
@@ -1388,6 +1397,47 @@ Exported from DDLSetupMarket (ddlsetupmarket.com)`;
         )}
       </div>
 
+      {/* GLOBAL SHARED POOL ACTIVE FILTER NOTICE BANNER */}
+      {(selectedGameFilter !== 'all' || selectedTrackFilter !== 'all' || viewMode !== 'all' || selectedCondition !== 'All' || selectedType !== 'All' || selectedDeviceFilter !== 'All' || selectedVerificationFilter !== 'All' || searchQuery) && (
+        <div className="bg-gradient-to-r from-red-950/40 via-slate-900/80 to-slate-950/90 border border-red-500/30 rounded-2xl p-3.5 mb-2 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+          <div className="flex items-center gap-2.5 text-xs text-slate-200">
+            <span className="w-7 h-7 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center font-black text-sm shrink-0 border border-red-500/30">
+              🌐
+            </span>
+            <div>
+              <p className="font-bold text-white text-xs">
+                {language === 'tr'
+                  ? `Filtrelenmiş Havuz (${filteredSetups.length} / ${setups.length} Setup Gösteriliyor)`
+                  : `Filtered Pool (Showing ${filteredSetups.length} of ${setups.length} Total Setups)`}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {language === 'tr'
+                  ? 'Sistemdeki diğer tüm kullanıcıların yüklediği ortak havuzdaki setupları görmek için filtreleri sıfırlayabilirsiniz.'
+                  : 'Clear active filters to view all global community setups shared across accounts.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedGameFilter('all');
+              setSelectedTrackFilter('all');
+              setSelectedCondition('All');
+              setSelectedType('All');
+              setSelectedDeviceFilter('All');
+              setSelectedVerificationFilter('All');
+              setSearchQuery('');
+              handleSetViewMode('all');
+              onTrackChange('all');
+            }}
+            className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>{language === 'tr' ? 'Ortak Havuzdaki Tüm Setupları Göster' : 'Show All Global Community Setups'}</span>
+          </button>
+        </div>
+      )}
+
       {/* SETUP CARDS GRID */}
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs text-slate-400 px-1 flex-wrap gap-2">
@@ -1409,9 +1459,13 @@ Exported from DDLSetupMarket (ddlsetupmarket.com)`;
             {viewMode === 'favorites' ? (
               <>
                 <Bookmark className="w-12 h-12 text-amber-400/60 mx-auto" />
-                <h3 className="text-base font-bold text-white">No Saved Favorites Yet</h3>
+                <h3 className="text-base font-bold text-white">
+                  {language === 'tr' ? 'Henüz Favori Setup Yok' : 'No Saved Favorites Yet'}
+                </h3>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Click the bookmark button on any setup card to save your favorite esports tunes and access them here instantly.
+                  {language === 'tr'
+                    ? 'Ortak havuzdaki beğendiğiniz setupları favorilerinize ekleyerek buraya hızlı erişim sağlayabilirsiniz.'
+                    : 'Click the bookmark button on any setup card to save your favorite esports tunes and access them here instantly.'}
                 </p>
                 <button
                   type="button"
@@ -1419,15 +1473,38 @@ Exported from DDLSetupMarket (ddlsetupmarket.com)`;
                   onClick={() => handleSetViewMode('all')}
                   className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs font-bold text-white shadow-lg cursor-pointer"
                 >
-                  Browse All Setups
+                  {language === 'tr' ? 'Tüm Ortak Setupları İncele' : 'Browse All Setups'}
+                </button>
+              </>
+            ) : viewMode === 'my-setups' ? (
+              <>
+                <User className="w-12 h-12 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-white">
+                  {language === 'tr' ? 'Henüz Kendi Setup’ınız Yok' : 'No Setups Created Yet'}
+                </h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  {language === 'tr'
+                    ? 'Diğer kullanıcıların yüklediği tüm ortak havuz setuplarını görmek için "Tüm Setuplar" sekmesine geçin veya kendiniz bir setup paylaşın.'
+                    : 'Switch to the "All Setups" tab to see setups uploaded by other users or upload your own.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleSetViewMode('all')}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white shadow-lg cursor-pointer"
+                >
+                  {language === 'tr' ? '🌐 Ortak Havuzdaki Tüm Setupları Göster' : 'Show Global Shared Pool Setups'}
                 </button>
               </>
             ) : (
               <>
                 <Car className="w-12 h-12 text-slate-600 mx-auto" />
-                <h3 className="text-base font-bold text-white">No Setups Found</h3>
+                <h3 className="text-base font-bold text-white">
+                  {language === 'tr' ? 'Arama Kriterlerine Uygun Setup Bulunamadı' : 'No Setups Found'}
+                </h3>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Try adjusting your search keywords, track circuit, weather condition, or controller filters.
+                  {language === 'tr'
+                    ? 'Seçili pist, oyun veya hava durumu filtresini temizleyerek veritabanındaki tüm topluluk setuplarını görebilirsiniz.'
+                    : 'Try adjusting your search keywords, track circuit, weather condition, or controller filters.'}
                 </p>
                 <button
                   type="button"
@@ -1435,13 +1512,17 @@ Exported from DDLSetupMarket (ddlsetupmarket.com)`;
                     setSelectedGameFilter('all');
                     setSelectedTrackFilter('all');
                     setSelectedCondition('All');
+                    setSelectedType('All');
                     setSelectedDeviceFilter('All');
+                    setSelectedVerificationFilter('All');
                     setSearchQuery('');
                     handleSetViewMode('all');
+                    onTrackChange('all');
                   }}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-sky-400 hover:text-sky-300 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-bold text-white shadow-lg cursor-pointer flex items-center gap-2 mx-auto"
                 >
-                  Reset Filters
+                  <Globe className="w-4 h-4" />
+                  <span>{language === 'tr' ? '🌐 Ortak Havuzdaki Tüm Setupları Göster (Filtreleri Temizle)' : 'Reset Filters & Show All Global Setups'}</span>
                 </button>
               </>
             )}

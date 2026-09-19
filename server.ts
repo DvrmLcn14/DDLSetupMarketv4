@@ -292,8 +292,8 @@ async function startServer() {
       if (Array.isArray(setupsList)) {
         // Merge with existing setups by ID to avoid wiping other users' setups
         const setupMap = new Map<string, any>();
-        globalCustomSetups.forEach((s) => setupMap.set(s.id, s));
-        setupsList.forEach((s) => setupMap.set(s.id, s));
+        globalCustomSetups.forEach((s) => setupMap.set(s.id, { ...s, isUserSubmitted: true }));
+        setupsList.forEach((s) => setupMap.set(s.id, { ...s, isUserSubmitted: true }));
 
         globalCustomSetups = Array.from(setupMap.values());
         fs.writeFileSync(setupsFile, JSON.stringify(globalCustomSetups, null, 2), 'utf-8');
@@ -313,7 +313,7 @@ async function startServer() {
   // POST /api/setups/add - Add single new setup or update existing setup
   app.post('/api/setups/add', (req, res) => {
     try {
-      const newSetup = req.body;
+      const newSetup = { ...req.body, isUserSubmitted: true };
       if (!newSetup || !newSetup.id) {
         return res.status(400).json({ success: false, error: 'Valid setup object with ID is required' });
       }

@@ -292,11 +292,15 @@ export default function App() {
             setSetups((prev) => {
               const customMap = new Map<string, CarSetup>();
 
-              // 1. Local custom setups
-              prev.filter((s) => s.isUserSubmitted).forEach((s) => customMap.set(s.id, s));
+              // 1. Add all server-persisted community setups from all users
+              serverSetups.forEach((s) => customMap.set(s.id, { ...s, isUserSubmitted: true }));
 
-              // 2. Override & merge server-persisted community setups from all users
-              serverSetups.forEach((s) => customMap.set(s.id, s));
+              // 2. Add local custom setups that might be pending
+              prev.filter((s) => s.isUserSubmitted).forEach((s) => {
+                if (!customMap.has(s.id)) {
+                  customMap.set(s.id, { ...s, isUserSubmitted: true });
+                }
+              });
 
               const mergedCustomList = Array.from(customMap.values());
 
@@ -331,8 +335,12 @@ export default function App() {
             const serverSetups: CarSetup[] = payload.payload;
             setSetups((prev) => {
               const customMap = new Map<string, CarSetup>();
-              prev.filter((s) => s.isUserSubmitted).forEach((s) => customMap.set(s.id, s));
-              serverSetups.forEach((s) => customMap.set(s.id, s));
+              serverSetups.forEach((s) => customMap.set(s.id, { ...s, isUserSubmitted: true }));
+              prev.filter((s) => s.isUserSubmitted).forEach((s) => {
+                if (!customMap.has(s.id)) {
+                  customMap.set(s.id, { ...s, isUserSubmitted: true });
+                }
+              });
               const mergedCustomList = Array.from(customMap.values());
               try {
                 localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(mergedCustomList));
