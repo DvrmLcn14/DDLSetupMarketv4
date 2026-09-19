@@ -125,6 +125,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
+
+      let eventSource: EventSource | null = null;
+      try {
+        eventSource = new EventSource('/api/events');
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'USERS_UPDATED' && Array.isArray(data.payload)) {
+              setUsersList(data.payload);
+            }
+          } catch (e) {}
+        };
+      } catch (err) {
+        console.warn('Admin SSE event connection fallback:', err);
+      }
+
+      return () => {
+        if (eventSource) eventSource.close();
+      };
     }
   }, [isAdmin]);
 

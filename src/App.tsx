@@ -239,6 +239,30 @@ export default function App() {
     return baseList;
   });
 
+  // Helper: Persist single user-submitted setup globally to server backend database
+  const saveSingleSetupToServer = async (setup: CarSetup) => {
+    try {
+      await fetch('/api/setups/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(setup),
+      });
+    } catch (err) {
+      console.warn('Failed to save setup globally to server:', err);
+    }
+  };
+
+  // Helper: Delete setup globally from server backend database
+  const deleteSetupFromServer = async (setupId: string) => {
+    try {
+      await fetch(`/api/setups/${setupId}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.warn('Failed to delete setup globally on server:', err);
+    }
+  };
+
   // Helper: Persist user-submitted setups globally to server backend database
   const syncGlobalSetupsToServer = async (allCurrentSetups: CarSetup[]) => {
     try {
@@ -253,7 +277,7 @@ export default function App() {
     }
   };
 
-  // Global Synchronizer: fetch latest global community setups from server database
+  // Global Synchronizer: fetch & listen for latest global community setups in real-time
   useEffect(() => {
     let isMounted = true;
 
@@ -293,14 +317,46 @@ export default function App() {
       }
     };
 
+    // 1. Initial fetch on mount
     fetchGlobalSetups();
 
-    // Poll every 8 seconds so all users see new setups shared by anyone in real-time
-    const setupPollInterval = setInterval(fetchGlobalSetups, 8000);
+    // 2. Real-time Server-Sent Events (SSE) listener for instantaneous 0-delay updates across all browsers
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/events');
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'SETUPS_UPDATED' && Array.isArray(payload.payload) && isMounted) {
+            const serverSetups: CarSetup[] = payload.payload;
+            setSetups((prev) => {
+              const customMap = new Map<string, CarSetup>();
+              prev.filter((s) => s.isUserSubmitted).forEach((s) => customMap.set(s.id, s));
+              serverSetups.forEach((s) => customMap.set(s.id, s));
+              const mergedCustomList = Array.from(customMap.values());
+              try {
+                localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(mergedCustomList));
+              } catch (e) {}
+              return [...mergedCustomList, ...INITIAL_SETUPS];
+            });
+          } else if (payload.type === 'BANNER_UPDATED' && payload.payload && isMounted) {
+            setBannerConfig(payload.payload);
+          }
+        } catch (e) {
+          // parse error
+        }
+      };
+    } catch (err) {
+      console.warn('SSE EventSource connection fallback to polling:', err);
+    }
+
+    // 3. Fast fallback interval polling (5 seconds)
+    const setupPollInterval = setInterval(fetchGlobalSetups, 5000);
     window.addEventListener('focus', fetchGlobalSetups);
 
     return () => {
       isMounted = false;
+      if (eventSource) eventSource.close();
       clearInterval(setupPollInterval);
       window.removeEventListener('focus', fetchGlobalSetups);
     };
@@ -373,6 +429,8 @@ export default function App() {
 
   // Handle adding a manual setup
   const handleAddSetup = (newSetup: CarSetup) => {
+    saveSingleSetupToServer(newSetup);
+
     setSetups((prev) => {
       const updated = [newSetup, ...prev];
       try {
@@ -422,12 +480,13 @@ export default function App() {
 
   // Handle deleting a setup created by the user
   const handleDeleteSetup = (setupId: string) => {
+    deleteSetupFromServer(setupId);
+
     setSetups((prev) => {
       const updated = prev.filter((s) => s.id !== setupId);
       try {
         const userOnly = updated.filter((s) => s.isUserSubmitted);
         localStorage.setItem('sim_marketplace_custom_setups', JSON.stringify(userOnly));
-        syncGlobalSetupsToServer(updated);
       } catch (e) {
         console.warn('Could not persist custom setups after deletion', e);
       }

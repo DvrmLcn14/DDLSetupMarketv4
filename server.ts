@@ -21,6 +21,21 @@ async function startServer() {
   const bannerConfigFile = path.join(dataDir, 'banner-config.json');
   const setupsFile = path.join(dataDir, 'setups.json');
   const usersFile = path.join(dataDir, 'users.json');
+  const commentsFile = path.join(dataDir, 'comments.json');
+
+  // Load existing comments from file or initialize with empty list
+  let globalCommentsList: any[] = [];
+  try {
+    if (fs.existsSync(commentsFile)) {
+      const raw = fs.readFileSync(commentsFile, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        globalCommentsList = parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading comments file:', err);
+  }
 
   // Default initial users list
   const defaultUsers = [
@@ -184,6 +199,39 @@ async function startServer() {
   }
 
   // ==========================================
+  // REAL-TIME SERVER-SENT EVENTS (SSE) STREAM
+  // ==========================================
+  const sseClients = new Set<express.Response>();
+
+  function broadcastRealtimeEvent(type: string, payload: any) {
+    const data = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
+    for (const client of sseClients) {
+      try {
+        client.write(`data: ${data}\n\n`);
+      } catch (err) {
+        sseClients.delete(client);
+      }
+    }
+  }
+
+  // GET /api/events - Real-time SSE channel for instantaneous setup & user updates
+  app.get('/api/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    sseClients.add(res);
+
+    // Send initial ping
+    res.write(`data: ${JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() })}\n\n`);
+
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  // ==========================================
   // PUBLIC GLOBAL API ROUTES
   // ==========================================
 
@@ -214,6 +262,8 @@ async function startServer() {
       fs.writeFileSync(bannerConfigFile, JSON.stringify(newConfig, null, 2), 'utf-8');
       console.log('✅ Global advertisement banner config updated by admin. Visible to all users.');
 
+      broadcastRealtimeEvent('BANNER_UPDATED', globalBannerConfig);
+
       res.json({
         success: true,
         message: 'Advertisement banner saved globally for all visitors.',
@@ -235,19 +285,102 @@ async function startServer() {
     });
   });
 
-  // POST /api/setups - Save / sync user submitted setups globally
+  // POST /api/setups - Upsert / sync user submitted setups globally
   app.post('/api/setups', (req, res) => {
     try {
       const setupsList = req.body;
       if (Array.isArray(setupsList)) {
-        globalCustomSetups = setupsList;
-        fs.writeFileSync(setupsFile, JSON.stringify(setupsList, null, 2), 'utf-8');
-        res.json({ success: true, message: 'Setups saved globally', count: setupsList.length });
+        // Merge with existing setups by ID to avoid wiping other users' setups
+        const setupMap = new Map<string, any>();
+        globalCustomSetups.forEach((s) => setupMap.set(s.id, s));
+        setupsList.forEach((s) => setupMap.set(s.id, s));
+
+        globalCustomSetups = Array.from(setupMap.values());
+        fs.writeFileSync(setupsFile, JSON.stringify(globalCustomSetups, null, 2), 'utf-8');
+
+        broadcastRealtimeEvent('SETUPS_UPDATED', globalCustomSetups);
+
+        res.json({ success: true, message: 'Setups saved globally', count: globalCustomSetups.length });
       } else {
         res.status(400).json({ success: false, error: 'Expected array of setups' });
       }
     } catch (err: any) {
       console.error('Error saving setups:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/setups/add - Add single new setup or update existing setup
+  app.post('/api/setups/add', (req, res) => {
+    try {
+      const newSetup = req.body;
+      if (!newSetup || !newSetup.id) {
+        return res.status(400).json({ success: false, error: 'Valid setup object with ID is required' });
+      }
+
+      const existingIndex = globalCustomSetups.findIndex((s) => s.id === newSetup.id);
+      if (existingIndex !== -1) {
+        globalCustomSetups[existingIndex] = { ...globalCustomSetups[existingIndex], ...newSetup };
+      } else {
+        globalCustomSetups.unshift(newSetup);
+      }
+
+      fs.writeFileSync(setupsFile, JSON.stringify(globalCustomSetups, null, 2), 'utf-8');
+
+      broadcastRealtimeEvent('SETUPS_UPDATED', globalCustomSetups);
+
+      res.json({ success: true, message: 'Setup added/updated globally', setup: newSetup });
+    } catch (err: any) {
+      console.error('Error adding setup:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/setups/:id - Delete setup globally across all accounts
+  app.delete('/api/setups/:id', (req, res) => {
+    try {
+      const setupId = req.params.id;
+      globalCustomSetups = globalCustomSetups.filter((s) => s.id !== setupId);
+      fs.writeFileSync(setupsFile, JSON.stringify(globalCustomSetups, null, 2), 'utf-8');
+
+      broadcastRealtimeEvent('SETUPS_UPDATED', globalCustomSetups);
+
+      res.json({ success: true, message: 'Setup deleted globally', setupId });
+    } catch (err: any) {
+      console.error('Error deleting setup:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==========================================
+  // SETUP COMMENTS API ROUTES (REALTIME DISCUSSIONS)
+  // ==========================================
+
+  // GET /api/comments - Fetch globally stored discussion comments
+  app.get('/api/comments', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({
+      success: true,
+      comments: globalCommentsList,
+    });
+  });
+
+  // POST /api/comments - Save / sync discussion comments globally and broadcast instantly
+  app.post('/api/comments', (req, res) => {
+    try {
+      const commentsData = req.body;
+      if (Array.isArray(commentsData)) {
+        globalCommentsList = commentsData;
+        fs.writeFileSync(commentsFile, JSON.stringify(globalCommentsList, null, 2), 'utf-8');
+
+        broadcastRealtimeEvent('COMMENTS_UPDATED', globalCommentsList);
+
+        res.json({ success: true, message: 'Comments updated globally', count: globalCommentsList.length });
+      } else {
+        res.status(400).json({ success: false, error: 'Expected array of comments' });
+      }
+    } catch (err: any) {
+      console.error('Error saving comments:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -346,6 +479,8 @@ async function startServer() {
       globalUsersList.push(newUser);
       fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
 
+      broadcastRealtimeEvent('USERS_UPDATED', globalUsersList);
+
       res.json({
         success: true,
         user: {
@@ -396,6 +531,8 @@ async function startServer() {
       globalUsersList.push(newUser);
       fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
 
+      broadcastRealtimeEvent('USERS_UPDATED', globalUsersList);
+
       res.json({
         success: true,
         message: 'Kullanıcı başarıyla oluşturuldu.',
@@ -435,6 +572,8 @@ async function startServer() {
 
       fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
 
+      broadcastRealtimeEvent('USERS_UPDATED', globalUsersList);
+
       res.json({
         success: true,
         message: 'Kullanıcı bilgileri güncellendi.',
@@ -465,6 +604,8 @@ async function startServer() {
       }
 
       fs.writeFileSync(usersFile, JSON.stringify(globalUsersList, null, 2), 'utf-8');
+
+      broadcastRealtimeEvent('USERS_UPDATED', globalUsersList);
 
       res.json({
         success: true,

@@ -247,7 +247,7 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
   const [exportedImagePreview, setExportedImagePreview] = useState<{ setup: CarSetup; imageUrl: string } | null>(null);
   const [newlySubmittedId, setNewlySubmittedId] = useState<string | null>(null);
 
-  // Setup Comments state with localStorage persistence
+  // Setup Comments state with server backend & real-time SSE sync
   const [comments, setComments] = useState<SetupComment[]>(() => {
     try {
       const stored = localStorage.getItem('sim_marketplace_comments');
@@ -262,6 +262,72 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
     }
     return INITIAL_COMMENTS;
   });
+
+  // Helper: Persist comments array to global server backend
+  const syncCommentsToServer = async (allComments: SetupComment[]) => {
+    try {
+      await fetch('/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(allComments),
+      });
+    } catch (err) {
+      console.warn('Failed to sync comments to server:', err);
+    }
+  };
+
+  // Global Synchronizer: fetch & listen for latest comments in real-time across all users
+  React.useEffect(() => {
+    let isMounted = true;
+
+    const fetchGlobalComments = async () => {
+      try {
+        const res = await fetch('/api/comments');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.comments) && isMounted) {
+            if (data.comments.length > 0) {
+              setComments(data.comments);
+              try {
+                localStorage.setItem('sim_marketplace_comments', JSON.stringify(data.comments));
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (err) {
+        // Silently handle fetch error
+      }
+    };
+
+    fetchGlobalComments();
+
+    // SSE EventSource connection for instant live comments broadcast
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/events');
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'COMMENTS_UPDATED' && Array.isArray(payload.payload) && isMounted) {
+            setComments(payload.payload);
+            try {
+              localStorage.setItem('sim_marketplace_comments', JSON.stringify(payload.payload));
+            } catch (e) {}
+          }
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('SSE Comment connection fallback:', err);
+    }
+
+    const pollInterval = setInterval(fetchGlobalComments, 5000);
+
+    return () => {
+      isMounted = false;
+      if (eventSource) eventSource.close();
+      clearInterval(pollInterval);
+    };
+  }, []);
 
   const getCommentCount = (setupId: string): number => {
     const list = comments.filter((c) => c.setupId === setupId);
@@ -322,6 +388,7 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
 
       try {
         localStorage.setItem('sim_marketplace_comments', JSON.stringify(updated));
+        syncCommentsToServer(updated);
       } catch (e) {
         console.warn('Could not persist comments', e);
       }
@@ -355,6 +422,7 @@ export const SetupMarketplace: React.FC<SetupMarketplaceProps> = ({
       const updated = toggleLike(prev);
       try {
         localStorage.setItem('sim_marketplace_comments', JSON.stringify(updated));
+        syncCommentsToServer(updated);
       } catch (e) {
         console.warn('Could not persist liked comments', e);
       }
